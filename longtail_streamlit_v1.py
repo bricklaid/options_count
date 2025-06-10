@@ -225,11 +225,11 @@ with col_right:
     fig1 = plt.figure(figsize=(10, 3))
     
     plt.plot(df['option_rank'], df['cum_revenue_pct'] / 100 * total_revenue,
-         'o-', label='Actual Revenue')
+         'o-', label='Actual Revenue', markersize=3,)
     plt.plot(x_full, fitted_per_option_rev_pct.cumsum() / 100 * total_revenue,
-            's--', label='Fitted Curve')
+            's--', label='Fitted Curve', markersize=3,)
     plt.plot(extended_df['option_rank'], extended_df['cum_revenue_abs'],
-            'd-.', label='Extended Curve')
+            'd-.', label='Extended Curve', markersize=3,)
     plt.axhline(future_revenue, color='red', linestyle='--', label='Future Revenue')
     if required_options:
         plt.axvline(required_options, color='green', linestyle=':', label=f'Required Options = {required_options}')
@@ -251,7 +251,7 @@ with col_right:
     st.markdown(f"##### Historical Options")
     fig2 = plt.figure(figsize=(10, 3))
     cum_rev_abs_target = df['cum_revenue_pct'] / 100 * total_revenue
-    plt.plot(df['option_rank'], cum_rev_abs_target, marker='o')
+    plt.plot(df['option_rank'], cum_rev_abs_target, marker='o', markersize=3,)
     plt.xlabel('Options')
     plt.ylabel('Cumulative Revenue')
     # plt.title(f'Cumulative Revenue - {selected_scenario}')
