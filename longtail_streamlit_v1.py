@@ -89,7 +89,7 @@ scenario_specs = [
 scenario_dfs = []
 for idx, (method, count, param, param2) in enumerate(scenario_specs, start=1):
     df = generate_scenario(count, method, param, param2)
-        df['scenario_name'] = f'Scenario {idx}'
+    df['scenario_name'] = f'Scenario {idx}'
     
     total_pct = df['per_option_revenue_pct'].sum()
     if not np.isclose(total_pct, 100, rtol=1e-5):
