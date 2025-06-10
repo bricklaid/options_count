@@ -4,14 +4,15 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 
-# ----- 1. Scenario Generation -----
-
 np.random.seed(42)
+
+import numpy as np
+import pandas as pd
 
 def normalize(arr):
     return arr / arr.sum() * 100
 
-def generate_scenario(option_count, method, param=None):
+def generate_scenario(option_count, method, param=None, param2=None):
     rank = np.arange(1, option_count + 1)
     if method == 'exp_decay':
         values = np.exp(-param * (rank - 1))
@@ -25,6 +26,27 @@ def generate_scenario(option_count, method, param=None):
         values = np.ones(option_count)
     elif method == 'dirichlet':
         values = np.random.dirichlet(alpha=np.full(option_count, param))
+    elif method == 'gaussian_bump':
+        values = np.exp(-((rank - param) ** 2) / (2 * param2 ** 2))
+    elif method == 'step_function':
+        step_size = option_count // param
+        values = np.ones(option_count)
+        for i in range(param):
+            start = i * step_size
+            end = (i + 1) * step_size if i < param - 1 else option_count
+            values[start:end] *= (param - i) / param
+    elif method == 'sigmoid_decay':
+        values = 1 / (1 + np.exp(param * (rank - param2)))
+    elif method == 'periodic_oscillation':
+        decay = np.exp(-0.1 * (rank - 1))
+        oscillation = param2 * np.sin(param * rank)
+        values = decay * (1 + oscillation)
+        values = np.maximum(values, 0.01)
+    elif method == 'hybrid_decay':
+        values = np.zeros(option_count)
+        split = int(param)
+        values[:split] = np.exp(-param2 * (rank[:split] - 1))
+        values[split:] = np.linspace(values[split-1], 0.1, option_count - split)
     else:
         raise ValueError(f"Unknown method: {method}")
     
@@ -37,26 +59,46 @@ def generate_scenario(option_count, method, param=None):
         'cum_revenue_pct': cum_pct
     })
 
+# Updated scenario_specs with explicit param2 for all entries
 scenario_specs = [
-    ('exp_decay', 10, 0.3),
-    ('exp_decay', 20, 0.1),
-    ('powerlaw', 15, 1.5),
-    ('reverse_powerlaw', 12, 2.0),
-    ('linear_decay', 18, None),
-    ('uniform', 25, None),
-    ('dirichlet', 30, 0.5),
-    ('dirichlet', 25, 2),
+    # Original scenarios
+    ('exp_decay', 10, 0.3, None),
+    ('exp_decay', 20, 0.1, None),
+    ('powerlaw', 15, 1.5, None),
+    ('reverse_powerlaw', 12, 2.0, None),
+    ('linear_decay', 18, None, None),
+    ('uniform', 25, None, None),
+    ('dirichlet', 30, 0.5, None),
+    ('dirichlet', 25, 2, None),
+    # New scenarios
+    ('gaussian_bump', 20, 10, 3),
+    ('step_function', 15, 3, None),
+    ('sigmoid_decay', 25, 0.5, 12),
+    ('periodic_oscillation', 30, 0.5, 0.3),
+    ('hybrid_decay', 20, 10, 0.2),
+    ('exp_decay', 15, 0.5, None),
+    ('powerlaw', 25, 2.5, None),
+    ('reverse_powerlaw', 20, 1.0, None),
+    ('linear_decay', 30, None, None),
+    ('uniform', 10, None, None),
+    ('dirichlet', 20, 1.0, None),
+    ('gaussian_bump', 30, 5, 2),
 ]
 
+# Generate DataFrames for each scenario with metadata
 scenario_dfs = []
-for idx, (method, count, param) in enumerate(scenario_specs, start=1):
-    df = generate_scenario(count, method, param)
-    df['scenario_name'] = f'Scenario {idx}'
+for idx, (method, count, param, param2) in enumerate(scenario_specs, start=1):
+    df = generate_scenario(count, method, param, param2)
+        df['scenario_name'] = f'Scenario {idx}'
+    
+    total_pct = df['per_option_revenue_pct'].sum()
+    if not np.isclose(total_pct, 100, rtol=1e-5):
+        print(f"Warning: Scenario {idx} per_option_revenue_pct sums to {total_pct}, not 100")
+    
     scenario_dfs.append(df)
 
 df_all = pd.concat(scenario_dfs, ignore_index=True)
 
-# ----- 2. Fitting + Extension Logic -----
 
 def inverse_decay(x, a, b):
     return a / (x + b)
@@ -117,10 +159,20 @@ with col_left:
     # Revenue inputs
     col1, col2 = st.columns(2)
     with col1:
-        total_revenue = st.number_input("Total Historical Revenue", value=10000.0)
+        # total_revenue = st.number_input("Total Historical Revenue", value=10000.0)
+        total_revenue = int(st.number_input("Total Historical Revenue", 
+                                   value=10000, 
+                                   step=100, 
+                                   min_value=0, 
+                                   format="%d"))
+    
     with col2:
-        future_revenue = st.number_input("Target Future Revenue", value=14000.0)
-
+        # future_revenue = st.number_input("Target Future Revenue", value=14000.0)
+        future_revenue = int(st.number_input("Target Future Revenue", 
+                                   value=12000, 
+                                   step=100, 
+                                   min_value=0, 
+                                   format="%d"))
     # Get selected scenario data
     df = df_all[df_all['scenario_name'] == selected_scenario]
 
@@ -186,14 +238,12 @@ with col_right:
         long_tail_rank = int(long_tail_candidates['option_rank'].iloc[0])
         plt.axvline(long_tail_rank, color='purple', linestyle=':', label=f'Long-Tail Cutoff = {long_tail_rank}')
 
-    plt.legend(fontsize=5)  # or use a numeric value like fontsize=8
-
     plt.xlabel('Options')
     plt.ylabel('Cumulative Revenue')
-    # plt.title('Actual, Fitted, and Extended Cumulative Revenue')
-    plt.legend()
     plt.grid(True)
     plt.gca().xaxis.get_major_locator().set_params(integer=True)
+
+    plt.legend(fontsize=5)  
     st.pyplot(fig1)
     plt.close(fig1)
 
