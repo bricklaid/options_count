@@ -275,7 +275,7 @@ with col_left:
                                    value=3, 
                                    step=1, 
                                    min_value=2,
-                                   max_values=6, 
+                                   max_value=6, 
                                    format="%d"))
 
     poly_coeffs = np.polyfit(df['option_rank'], df['per_option_revenue_pct'], degree)
@@ -296,7 +296,7 @@ with col_left:
                                    value=5, 
                                    step=1, 
                                    min_value=1,
-                                   max_values=int(df['option_rank'].max()), 
+                                   max_value=int(df['option_rank'].max()), 
                                    format="%d"))
     extended_df_poly =  extend_curve_polynomial_with_inverse_decay(total_revenue, future_revenue, poly_func, fitted_per_option_rev_pct_poly, 
                         x_full, df, 
