@@ -8,9 +8,6 @@ from scipy.optimize import curve_fit
 
 np.random.seed(42)
 
-import numpy as np
-import pandas as pd
-
 def normalize(arr):
     return arr / arr.sum() * 100
 
