@@ -162,15 +162,26 @@ def extend_curve_polynomial_with_inverse_decay(total_revenue, future_revenue, po
         return a / (x + b)
     
     # Use the last 5 ranks for fitting the tail (adjustable)
-    tail_length = decay_rate_length
+    tail_length = min(decay_rate_length, len(extended_ranks))
+
     if len(x_full) >= tail_length:
         tail_ranks = x_full[-tail_length:]  # e.g., [6, 7, 8, 9, 10]
+        print('tail_ranks', tail_ranks)
+
         tail_values = fitted_per_option_rev_pct[-tail_length:]  # e.g., [9.8, 3.2, 2.3, 2.1, 2.4]
+        print('tail_values', tail_values)
+
+
+        # Convert tail_ranks to numpy array to ensure positional indexing
+        if isinstance(tail_ranks, pd.Series):
+            tail_ranks = tail_ranks.to_numpy()
+        
         # Normalize x to start at 0 for fitting
-        tail_ranks_shifted = tail_ranks - tail_ranks[0]
+        tail_ranks_shifted = tail_ranks - tail_ranks[0]  # Now works with numpy array
+
         # Initial guesses: a = first tail value, b = small decay rate
         try:
-            params, _ = curve_fit(exp_decay, tail_ranks_shifted, tail_values, p0=[tail_values[0], 0.1], maxfev=10000)
+            params, _ = curve_fit(inverse_decay, tail_ranks_shifted, tail_values, p0=[tail_values[0], 0.1], maxfev=10000)
             a, b = params
             print(f"Fitted exponential decay parameters: a={a:.3f}, b={b:.3f}")
         except RuntimeError:
@@ -268,48 +279,6 @@ with col_left:
                                             inverse_decay, params_inv, scale_factor)
     required_options = find_required_options(extended_df, future_revenue)
 
-
-    # Method 2
-    
-    degree = int(st.number_input("Polynomial Degree", 
-                                   value=3, 
-                                   step=1, 
-                                   min_value=2,
-                                   max_value=6, 
-                                   format="%d"))
-
-    poly_coeffs = np.polyfit(df['option_rank'], df['per_option_revenue_pct'], degree)
-    poly_func = np.poly1d(poly_coeffs)
-    print(f"Polynomial coefficients (degree {degree}): {poly_coeffs}")
-
-    # Calculate fitted values over historical range
-    x_full_poly = np.arange(1, df['option_rank'].max() + 1)
-    fitted_per_option_rev_pct_poly = poly_func(x_full_poly)
-
-    # Scale factor to ensure fitted values sum to 100%
-    scale_factor_poly = df['per_option_revenue_pct'].sum() / fitted_per_option_rev_pct_poly.sum()
-    print(f"Scale factor: {scale_factor_poly:.2f}")
-    fitted_per_option_rev_pct_poly *= scale_factor_poly
-
-
-    decay_length = int(st.number_input("# Last Options for Decay", 
-                                   value=5, 
-                                   step=1, 
-                                   min_value=1,
-                                   max_value=int(df['option_rank'].max()), 
-                                   format="%d"))
-    extended_df_poly =  extend_curve_polynomial_with_inverse_decay(total_revenue, future_revenue, poly_func, fitted_per_option_rev_pct_poly, 
-                        x_full, df, 
-                        decay_rate_length=decay_length,
-                        max_extend=200, tol=1e-5)
-
-    # extended_df_poly = extend_curve_inverse_decay(df, total_revenue, future_revenue,fitted_per_option_rev_pct_poly
-    #                                         inverse_decay, params_inv, scale_factor)
-    required_options_poly = find_required_options(extended_df_poly, future_revenue)
-
-
-
-    
     # Add long-tail cutoff at 90% of historical total cumulative revenue
     historical_total = total_revenue  # $1,000,000
     long_tail_target = 0.9 * historical_total  # 90% of 1,000,000 = 900,000
@@ -338,10 +307,55 @@ with col_left:
             - 📉 **Historical Options**: {historical_options}
             """
         )
+
+    # Method 2
+
+    col3, col4 = st.columns(2)
+    
+    with col3:
+    
+        degree = int(st.number_input("Polynomial Degree", 
+                                    value=3, 
+                                    step=1, 
+                                    min_value=2,
+                                    max_value=6, 
+                                    format="%d"))
+                            
+    with col4:
+        decay_length = int(st.number_input("#Options for Decay", 
+                                    value=5, 
+                                    step=1, 
+                                    min_value=1,
+                                    max_value=int(df['option_rank'].max()), 
+                                    format="%d"))
+
+
+    poly_coeffs = np.polyfit(df['option_rank'], df['per_option_revenue_pct'], degree)
+    poly_func = np.poly1d(poly_coeffs)
+    print(f"Polynomial coefficients (degree {degree}): {poly_coeffs}")
+
+    # Calculate fitted values over historical range
+    x_full_poly = np.arange(1, df['option_rank'].max() + 1)
+    fitted_per_option_rev_pct_poly = poly_func(x_full_poly)
+
+    # Scale factor to ensure fitted values sum to 100%
+    scale_factor_poly = df['per_option_revenue_pct'].sum() / fitted_per_option_rev_pct_poly.sum()
+    print(f"Scale factor: {scale_factor_poly:.2f}")
+    fitted_per_option_rev_pct_poly *= scale_factor_poly
+
+
+    extended_df_poly =  extend_curve_polynomial_with_inverse_decay(total_revenue, future_revenue, poly_func, fitted_per_option_rev_pct_poly, 
+                        x_full, df, 
+                        decay_rate_length=decay_length,
+                        max_extend=200, tol=1e-5)
+
+    # extended_df_poly = extend_curve_inverse_decay(df, total_revenue, future_revenue,fitted_per_option_rev_pct_poly
+    #                                         inverse_decay, params_inv, scale_factor)
+    required_options_poly = find_required_options(extended_df_poly, future_revenue)
     
     st.markdown("###### 📌 Method 2 (Poly Fit)")
 
-    if required_options:
+    if required_options_poly:
         st.success(
             f"""
             - 📉 **Historical Options**: {historical_options}
@@ -395,9 +409,9 @@ with col_right:
     
     plt.plot(df['option_rank'], df['cum_revenue_pct'] / 100 * total_revenue,
          'o-', label='Actual Revenue', markersize=3,)
-    plt.plot(x_full, fitted_per_option_rev_pct.cumsum() / 100 * total_revenue,
+    plt.plot(x_full, fitted_per_option_rev_pct_poly.cumsum() / 100 * total_revenue,
             's--', label='Fitted Curve', markersize=3,)
-    plt.plot(extended_df['option_rank'], extended_df['cum_revenue_abs'],
+    plt.plot(extended_df_poly['option_rank'], extended_df_poly['cum_revenue_abs'],
             'd-.', label='Extended Curve', markersize=3,)
     plt.axhline(future_revenue, color='red', linestyle='--', label='Future Revenue')
     if required_options_poly:
