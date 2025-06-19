@@ -14,14 +14,127 @@ def normalize(arr):
 
 import os
 
-#os.chdir(r"C:\Users\pramod.kumar\OneDrive - o9 Solutions\Documents\URBN_DATA\HML_data")
-df_historical_revenue = pd.read_csv('historical_revenue.csv')
+os.chdir(r"C:\Users\pramod.kumar\OneDrive - o9 Solutions\Documents\URBN_DATA\HML_data")
 
-df_future_revenue = pd.read_csv('future_revenue.csv')
+weekly_sales = pd.read_csv('pag_weekly_sales_data_with_inventory.csv')
 
-df_input = pd.read_csv('option_input_df.csv')
 
-df_all = pd.concat([df_input])
+# Step 1: Filter 2023 data
+data_2023 = weekly_sales[weekly_sales['year'] == 2023]
+
+# Step 2: Identify PAGs with at least 3 stylecolor_snum where qty > 0 in 2023
+valid_pags = (
+    data_2023[data_2023['qty'] > 0]
+    .groupby('pag')['stylecolor_snum']
+    .nunique()
+    .reset_index(name='nonzero_stylecolor_count')
+)
+
+valid_pags = valid_pags[valid_pags['nonzero_stylecolor_count'] >= 3]['pag']
+
+# Step 3: Identify PAGs that exist in both 2023 and 2024
+pags_2023 = set(weekly_sales[weekly_sales['year'] == 2023]['pag'].unique())
+pags_2024 = set(weekly_sales[weekly_sales['year'] == 2024]['pag'].unique())
+common_pags = pags_2023 & pags_2024
+
+# Step 4: Filter weekly_sales where pag is in both years AND passes 2023 logic
+final_pags = valid_pags[valid_pags.isin(common_pags)]
+upd_historical_data = weekly_sales[weekly_sales['pag'].isin(final_pags)]
+
+top_pags = (
+    upd_historical_data
+    .groupby('pag', as_index=False)['qty']
+    .sum()
+    .query('qty > 0')
+    .sort_values('qty', ascending=False)
+    .head(30)  # top_pag is your desired count (e.g., 10)
+)
+
+# 2. Filter weekly_sales to include only those top PAGs
+weekly_sales_top_pag = upd_historical_data[upd_historical_data['pag'].isin(top_pags['pag'])]
+
+
+# df_historical_revenue = pd.read_csv('historical_revenue.csv')
+
+# df_future_revenue = pd.read_csv('future_revenue.csv')
+
+# df_input = pd.read_csv('option_input_df.csv')
+
+# df_all = pd.concat([df_input])
+
+def historical_option_data(df):
+    filtered_historical_pag = df.copy()
+
+    option_input_df = filtered_historical_pag[['pag','stylecolor_snum', 'qty']].drop_duplicates()
+
+    agg_df = option_input_df.groupby(['pag', 'stylecolor_snum'])['qty'].sum().reset_index()
+    agg_df['total_qty_pag'] = agg_df.groupby('pag')['qty'].transform('sum')
+
+    agg_df['per_option_revenue_pct'] = agg_df['qty'] / agg_df['total_qty_pag'] * 100
+
+    agg_df['option_rank'] = agg_df.groupby('pag')['qty'].rank(ascending=False, method='first')
+
+    agg_df = agg_df.sort_values(['pag', 'option_rank'])
+
+    agg_df['cum_revenue_pct'] = agg_df.groupby('pag')['per_option_revenue_pct'].cumsum()
+
+    option_input_df = option_input_df.merge(
+        agg_df[['pag', 'stylecolor_snum', 'option_rank', 'per_option_revenue_pct', 'cum_revenue_pct']],
+        on=['pag', 'stylecolor_snum'],
+        how='left'
+    )
+    agg_df = agg_df[['pag', 'option_rank', 'per_option_revenue_pct', 'cum_revenue_pct']].drop_duplicates()
+
+    return agg_df
+
+
+def width_data_preparation(df, top_pag = 100):
+    df_sales = df.copy()
+
+    historical_pag = df_sales[df_sales['year']== 2023]
+    future_pag = df_sales[df_sales['year']== 2024]
+
+    top_pags = historical_pag.groupby(['pag']).agg({'qty':'sum'}).reset_index().sort_values('qty', ascending=False)
+    # top_pags = top_pags[top_pags['qty']>0]
+    # top_pags = top_pags[0:top_pag]
+
+    
+    filtered_future_pag = future_pag[future_pag['pag'].isin(top_pags['pag'].unique())]
+    
+    # future_revenue = filtered_future_pag.groupby(['pag']).agg({'qty':'sum', 
+    #                 'stylecolor_snum': lambda x:x.nunique()}).reset_index()
+    
+    future_revenue = (
+    filtered_future_pag
+    .groupby(['pag'])
+    .agg(
+        qty=('qty', 'sum'),
+        stylecolor_snum_total=('stylecolor_snum', 'nunique'),
+        stylecolor_snum_nonzero=('stylecolor_snum', lambda x: x[filtered_future_pag.loc[x.index, 'qty'] > 0].nunique())
+    )
+    .reset_index()
+    )
+
+
+    filtered_historical_pag = historical_pag[historical_pag['pag'].isin(top_pags['pag'].unique())]
+
+    historical_revenue = (
+    filtered_historical_pag
+    .groupby(['pag'])
+    .agg(
+        qty=('qty', 'sum'),
+        stylecolor_snum_total=('stylecolor_snum', 'nunique'),
+        stylecolor_snum_nonzero=('stylecolor_snum', lambda x: x[filtered_historical_pag.loc[x.index, 'qty'] > 0].nunique())
+    )
+    .reset_index()
+    )
+
+
+    option_df = historical_option_data(filtered_historical_pag)
+
+
+    return historical_revenue, future_revenue, option_df
+
 
 
 def inverse_decay(x, a, b):
@@ -161,8 +274,96 @@ col_left, col_right = st.columns([1, 3])  # Left is narrower, right is wider
 with col_left:
 
 
-    scenario_list = df_all['pag'].unique()
+    # # Input weeks
+    # col1, col2 = st.columns(2)
+    # with col1:
+    #     start_week = int(st.number_input(
+    #         "Start Week",
+    #         value=1,
+    #         step=1,
+    #         min_value=1,
+    #         max_value=40,  # So end_week = start_week + 12 ≤ 52
+    #         format="%d"
+    #     ))
+
+    # with col2:
+    #     min_end_week = start_week + 12
+    #     end_week = int(st.number_input(
+    #         "End Week",
+    #         value=min_end_week,
+    #         step=1,
+    #         min_value=min_end_week,
+    #         max_value=52,
+    #         format="%d"
+    #     ))
+
+    # filtered_data = weekly_sales[(weekly_sales['week']>=start_week)&(weekly_sales['week']<=end_week)]
+
+
+
+    # df_historical_revenue, df_future_revenue, df_input = width_data_preparation(filtered_data)
+    
+    # df_all = pd.concat([df_input])
+
+    # scenario_list = df_all['pag'].unique()
+    # selected_scenario = st.selectbox("Select a PAG", scenario_list)
+
+
+
+    # Get all unique scenarios from full dataset
+    scenario_list = weekly_sales_top_pag['pag'].unique()
     selected_scenario = st.selectbox("Select a PAG", scenario_list)
+
+    # Filter data based on selected scenario
+    scenario_data = weekly_sales_top_pag[weekly_sales_top_pag['pag'] == selected_scenario]
+
+    # print(scenario_data.head(2))
+
+    # # Get min and max week values for this scenario
+    # min_week = int(scenario_data['week'].min())
+    # max_week = int(scenario_data['week'].max() - 4)  # ensure 12-week gap is possible
+
+    # # Handle edge case where there's not enough data
+    # if max_week < min_week:
+    #     st.warning("Not enough data for 12-week selection in this scenario.")
+    #     st.stop()
+
+    # # Input weeks AFTER scenario is selected
+    # col1, col2 = st.columns(2)
+    # with col1:
+    #     start_week = int(st.number_input(
+    #         "Start Week",
+    #         value=min_week,
+    #         step=1,
+    #         min_value=min_week,
+    #         max_value=max_week,  # So end_week = start_week + 12 ≤ actual max
+    #         format="%d"
+    #     ))
+
+    # with col2:
+    #     min_end_week = start_week + 4
+    #     actual_max_week = int(scenario_data['week'].max())
+    #     end_week = int(st.number_input(
+    #         "End Week",
+    #         value=min_end_week,
+    #         step=1,
+    #         min_value=min_end_week,
+    #         max_value=actual_max_week,
+    #         format="%d"
+    #     ))
+
+    # # Filter based on selected scenario and weeks
+    # filtered_data = scenario_data[(scenario_data['week'] >= start_week) & 
+    #                             (scenario_data['week'] <= end_week)]
+
+    filtered_data = scenario_data.copy()
+
+    # Continue processing
+    df_historical_revenue, df_future_revenue, df_input = width_data_preparation(filtered_data)
+    df_all = pd.concat([df_input])
+
+    print(df_historical_revenue[df_historical_revenue['pag'] == selected_scenario])
+    # print(df_historical_revenue.loc[df_historical_revenue['pag'] == selected_scenario, 'qty'])
 
     # Get selected scenario data
     df = df_all[df_all['pag'] == selected_scenario]
@@ -170,7 +371,8 @@ with col_left:
 
     historical_revenue = df_historical_revenue.loc[df_historical_revenue['pag'] == selected_scenario, 'qty'].iloc[0]
     target_revenue = df_future_revenue.loc[df_future_revenue['pag'] == selected_scenario, 'qty'].iloc[0]
-    target_selected_options = df_future_revenue.loc[df_future_revenue['pag'] == selected_scenario, 'stylecolor_snum'].iloc[0]
+    target_selected_options = df_future_revenue.loc[df_future_revenue['pag'] == selected_scenario, 'stylecolor_snum_total'].iloc[0]
+    target_selected_nonzero_options = df_future_revenue.loc[df_future_revenue['pag'] == selected_scenario, 'stylecolor_snum_nonzero'].iloc[0]
 
     
     # Revenue inputs
@@ -229,6 +431,7 @@ with col_left:
             - 🎯 **Required Options**: {required_options}  
             - ➕ **Additional Options Needed**: {required_options - historical_options}
             - 🧮 **Acutal Options**:{target_selected_options}
+            - 📉 **Acutal Options with Sales**:{target_selected_nonzero_options}
             """
         )
     else:
@@ -241,68 +444,68 @@ with col_left:
 
     # Method 2
 
-    col3, col4 = st.columns(2)
+    # col3, col4 = st.columns(2)
     
-    with col3:
+    # with col3:
     
-        degree = int(st.number_input("Polynomial Degree", 
-                                    value=3, 
-                                    step=1, 
-                                    min_value=2,
-                                    max_value=6, 
-                                    format="%d"))
+    #     degree = int(st.number_input("Polynomial Degree", 
+    #                                 value=3, 
+    #                                 step=1, 
+    #                                 min_value=2,
+    #                                 max_value=6, 
+    #                                 format="%d"))
                             
-    with col4:
-        decay_length = int(st.number_input("#Options for Decay", 
-                                    value=5, 
-                                    step=1, 
-                                    min_value=1,
-                                    max_value=int(df['option_rank'].max()), 
-                                    format="%d"))
+    # with col4:
+    #     decay_length = int(st.number_input("#Options for Decay", 
+    #                                 value=5, 
+    #                                 step=1, 
+    #                                 min_value=1,
+    #                                 max_value=int(df['option_rank'].max()), 
+    #                                 format="%d"))
 
 
-    poly_coeffs = np.polyfit(df['option_rank'], df['per_option_revenue_pct'], degree)
-    poly_func = np.poly1d(poly_coeffs)
-    print(f"Polynomial coefficients (degree {degree}): {poly_coeffs}")
+    # poly_coeffs = np.polyfit(df['option_rank'], df['per_option_revenue_pct'], degree)
+    # poly_func = np.poly1d(poly_coeffs)
+    # print(f"Polynomial coefficients (degree {degree}): {poly_coeffs}")
 
-    # Calculate fitted values over historical range
-    x_full_poly = np.arange(1, df['option_rank'].max() + 1)
-    fitted_per_option_rev_pct_poly = poly_func(x_full_poly)
+    # # Calculate fitted values over historical range
+    # x_full_poly = np.arange(1, df['option_rank'].max() + 1)
+    # fitted_per_option_rev_pct_poly = poly_func(x_full_poly)
 
-    # Scale factor to ensure fitted values sum to 100%
-    scale_factor_poly = df['per_option_revenue_pct'].sum() / fitted_per_option_rev_pct_poly.sum()
-    print(f"Scale factor: {scale_factor_poly:.2f}")
-    fitted_per_option_rev_pct_poly *= scale_factor_poly
+    # # Scale factor to ensure fitted values sum to 100%
+    # scale_factor_poly = df['per_option_revenue_pct'].sum() / fitted_per_option_rev_pct_poly.sum()
+    # print(f"Scale factor: {scale_factor_poly:.2f}")
+    # fitted_per_option_rev_pct_poly *= scale_factor_poly
 
 
-    extended_df_poly =  extend_curve_polynomial_with_inverse_decay(total_revenue, future_revenue, poly_func, fitted_per_option_rev_pct_poly, 
-                        x_full, df, 
-                        decay_rate_length=decay_length,
-                        max_extend=200, tol=1e-5)
+    # extended_df_poly =  extend_curve_polynomial_with_inverse_decay(total_revenue, future_revenue, poly_func, fitted_per_option_rev_pct_poly, 
+    #                     x_full, df, 
+    #                     decay_rate_length=decay_length,
+    #                     max_extend=200, tol=1e-5)
 
-    # extended_df_poly = extend_curve_inverse_decay(df, total_revenue, future_revenue,fitted_per_option_rev_pct_poly
-    #                                         inverse_decay, params_inv, scale_factor)
-    required_options_poly = find_required_options(extended_df_poly, future_revenue)
+    # # extended_df_poly = extend_curve_inverse_decay(df, total_revenue, future_revenue,fitted_per_option_rev_pct_poly
+    # #                                         inverse_decay, params_inv, scale_factor)
+    # required_options_poly = find_required_options(extended_df_poly, future_revenue)
     
-    st.markdown("###### 📌 Method 2 (Poly Fit)")
+    # st.markdown("###### 📌 Method 2 (Poly Fit)")
 
-    if required_options_poly:
-        st.success(
-            f"""
-            - 🔢 **Historical Options**: {historical_options}
-            - 🪃 **Long-Tail Cutoff**: {long_tail_rank}  
-            - 🎯 **Required Options**: {required_options_poly}  
-            - ➕ **Additional Options Needed**: {required_options_poly - historical_options}
-            - 🧮 **Acutal Options**:{target_selected_options}
-            """
-        )
-    else:
-        st.error(
-            f"""
-            ❌ Could not reach the future revenue target with extrapolation.  
-            - 📉 **Historical Options**: {historical_options}
-            """
-        )
+    # if required_options_poly:
+    #     st.success(
+    #         f"""
+    #         - 🔢 **Historical Options**: {historical_options}
+    #         - 🪃 **Long-Tail Cutoff**: {long_tail_rank}  
+    #         - 🎯 **Required Options**: {required_options_poly}  
+    #         - ➕ **Additional Options Needed**: {required_options_poly - historical_options}
+    #         - 🧮 **Acutal Options**:{target_selected_options}
+    #         """
+    #     )
+    # else:
+    #     st.error(
+    #         f"""
+    #         ❌ Could not reach the future revenue target with extrapolation.  
+    #         - 📉 **Historical Options**: {historical_options}
+    #         """
+    #     )
     
 
 with col_right:
@@ -336,28 +539,28 @@ with col_right:
 
 
 
-    st.markdown("##### Target Revenue and Options (Method 2)")
-    fig2 = plt.figure(figsize=(10, 3))
+    # st.markdown("##### Target Revenue and Options (Method 2)")
+    # fig2 = plt.figure(figsize=(10, 3))
     
-    plt.plot(df['option_rank'], df['cum_revenue_pct'] / 100 * total_revenue,
-         'o-', label='Actual Revenue', markersize=3,)
-    plt.plot(x_full, fitted_per_option_rev_pct_poly.cumsum() / 100 * total_revenue,
-            's--', label='Fitted Curve', markersize=3,)
-    plt.plot(extended_df_poly['option_rank'], extended_df_poly['cum_revenue_abs'],
-            'd-.', label='Extended Curve', markersize=3,)
-    plt.axhline(future_revenue, color='red', linestyle='--', label='Future Revenue')
-    if required_options_poly:
-        plt.axvline(required_options_poly, color='green', linestyle=':', label=f'Required Options = {required_options_poly}')
+    # plt.plot(df['option_rank'], df['cum_revenue_pct'] / 100 * total_revenue,
+    #      'o-', label='Actual Revenue', markersize=3,)
+    # plt.plot(x_full, fitted_per_option_rev_pct_poly.cumsum() / 100 * total_revenue,
+    #         's--', label='Fitted Curve', markersize=3,)
+    # plt.plot(extended_df_poly['option_rank'], extended_df_poly['cum_revenue_abs'],
+    #         'd-.', label='Extended Curve', markersize=3,)
+    # plt.axhline(future_revenue, color='red', linestyle='--', label='Future Revenue')
+    # if required_options_poly:
+    #     plt.axvline(required_options_poly, color='green', linestyle=':', label=f'Required Options = {required_options_poly}')
 
-    if not long_tail_candidates.empty:
-        long_tail_rank = int(long_tail_candidates['option_rank'].iloc[0])
-        plt.axvline(long_tail_rank, color='purple', linestyle=':', label=f'Long-Tail Cutoff = {long_tail_rank}')
+    # if not long_tail_candidates.empty:
+    #     long_tail_rank = int(long_tail_candidates['option_rank'].iloc[0])
+    #     plt.axvline(long_tail_rank, color='purple', linestyle=':', label=f'Long-Tail Cutoff = {long_tail_rank}')
 
-    plt.xlabel('Options')
-    plt.ylabel('Cumulative Revenue')
-    plt.grid(True)
-    plt.gca().xaxis.get_major_locator().set_params(integer=True)
+    # plt.xlabel('Options')
+    # plt.ylabel('Cumulative Revenue')
+    # plt.grid(True)
+    # plt.gca().xaxis.get_major_locator().set_params(integer=True)
 
-    plt.legend(fontsize=5)  
-    st.pyplot(fig2)
-    plt.close(fig2)
+    # plt.legend(fontsize=5)  
+    # st.pyplot(fig2)
+    # plt.close(fig2)
