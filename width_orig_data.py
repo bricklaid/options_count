@@ -14,7 +14,7 @@ def normalize(arr):
 
 import os
 
-os.chdir(r"C:\Users\pramod.kumar\OneDrive - o9 Solutions\Documents\URBN_DATA\HML_data")
+#os.chdir(r"C:\Users\pramod.kumar\OneDrive - o9 Solutions\Documents\URBN_DATA\HML_data")
 
 weekly_sales = pd.read_csv('pag_weekly_sales_data_with_inventory.csv')
 
